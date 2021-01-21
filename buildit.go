@@ -3,20 +3,39 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
 var (
-	forF  = flag.String("for", "me", "-for linux\n-for windows\n-for me")
-	nameF = flag.String("name", "", "-name example")
+	forF     = flag.String("for", "me", "-for linux\n-for windows\n-for me")
+	nameF    = flag.String("name", "", "-name example")
+	versionF = flag.String("v", "", "-v major\n-v feat\n-v fix")
+
+	versionsTypes = map[string]string{
+		MAJOR: MAJOR,
+		MINOR: "feat",
+		PATCH: "fix",
+	}
 )
 
 const (
 	WINDOWS = "windows"
 	LINUX   = "linux"
 	CURRENT = "me"
+
+	MAJOR = "major"
+	MINOR = "minor"
+	PATCH = "patch"
+
+	newLine = "\n"
+
+	filePath = "./version/version.go"
 )
 
 func main() {
@@ -39,10 +58,73 @@ func main() {
 		filenameString = fmt.Sprintf("-o %s", filename)
 	}
 
-	cmd := exec.Command("powershell", fmt.Sprintf(`$env:GOOS="%s" ; go build %s`, platform, filenameString))
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println(err)
+	if strings.TrimSpace(*versionF) != "" {
+		switch strings.TrimSpace(*versionF) {
+		case MAJOR:
+			fallthrough
+		case MINOR:
+			fallthrough
+		case PATCH:
+			data, err := ioutil.ReadFile(filePath)
+			if err != nil {
+				log.Fatalln("unable to read data from file", err)
+			}
+			err = os.Remove(filePath)
+			if err != nil {
+				log.Fatalln("unable to remove file", err)
+			}
+
+			file, err := os.Create(filePath)
+			if err != nil {
+				log.Fatalln("unable to create file", err)
+			}
+
+			lines := strings.Split(string(data), newLine)
+			for index, line := range lines {
+				if i := strings.Index(line, *versionF+" = "); i != -1 {
+					versionPart, err := strconv.Atoi(line[i+len(*versionF+" = "):])
+					if err != nil {
+						log.Fatalln("invalid file syntax")
+						return
+					}
+					line = strings.Replace(line, strconv.Itoa(versionPart), strconv.Itoa(versionPart+1), 1)
+				}
+
+				if index == len(lines)-1 {
+					_, err := file.WriteString(line)
+					if err != nil {
+						log.Fatalln("unable to write,", err)
+					}
+
+					continue
+				}
+
+				_, err := file.WriteString(line + newLine)
+				if err != nil {
+					log.Fatalln("unable to write,", err)
+				}
+
+			}
+
+			err = file.Close()
+			if err != nil {
+				log.Fatalln("unable to close file", err)
+			}
+		default:
+			log.Fatalf("version type '%s' not found", *versionF)
+		}
+	}
+
+	build := &exec.Cmd{
+		Path:   "powershell",
+		Args:   []string{"clear", fmt.Sprintf(`$env:GOOS="%s" ; go build %s`, platform, filenameString)},
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	}
+
+	if err := build.Run(); err != nil {
+		fmt.Println("error:", err)
 	}
 
 }
